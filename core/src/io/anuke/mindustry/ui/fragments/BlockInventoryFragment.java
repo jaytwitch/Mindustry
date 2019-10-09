@@ -1,37 +1,34 @@
 package io.anuke.mindustry.ui.fragments;
 
-import io.anuke.annotations.Annotations.Loc;
-import io.anuke.annotations.Annotations.Remote;
-import io.anuke.arc.Core;
-import io.anuke.arc.collection.IntSet;
-import io.anuke.arc.function.BooleanProvider;
-import io.anuke.arc.function.Supplier;
-import io.anuke.arc.graphics.g2d.TextureRegion;
-import io.anuke.arc.input.KeyCode;
-import io.anuke.arc.math.Interpolation;
-import io.anuke.arc.math.Mathf;
-import io.anuke.arc.math.geom.Vector2;
-import io.anuke.arc.scene.Element;
-import io.anuke.arc.scene.Group;
-import io.anuke.arc.scene.actions.Actions;
+import io.anuke.annotations.Annotations.*;
+import io.anuke.arc.*;
+import io.anuke.arc.collection.*;
+import io.anuke.arc.function.*;
+import io.anuke.arc.graphics.g2d.*;
+import io.anuke.arc.input.*;
+import io.anuke.arc.math.*;
+import io.anuke.arc.math.geom.*;
+import io.anuke.arc.scene.*;
+import io.anuke.arc.scene.actions.*;
 import io.anuke.arc.scene.event.*;
-import io.anuke.arc.scene.ui.Image;
-import io.anuke.arc.scene.ui.layout.Stack;
-import io.anuke.arc.scene.ui.layout.Table;
+import io.anuke.arc.scene.ui.*;
+import io.anuke.arc.scene.ui.layout.*;
 import io.anuke.arc.util.*;
-import io.anuke.mindustry.core.GameState.State;
-import io.anuke.mindustry.entities.type.Player;
-import io.anuke.mindustry.gen.Call;
-import io.anuke.mindustry.type.Item;
-import io.anuke.mindustry.type.Item.Icon;
-import io.anuke.mindustry.world.Tile;
+import io.anuke.mindustry.core.GameState.*;
+import io.anuke.mindustry.entities.*;
+import io.anuke.mindustry.entities.type.*;
+import io.anuke.mindustry.game.*;
+import io.anuke.mindustry.game.EventType.*;
+import io.anuke.mindustry.gen.*;
+import io.anuke.mindustry.type.*;
+import io.anuke.mindustry.world.*;
 
 import static io.anuke.mindustry.Vars.*;
 
 public class BlockInventoryFragment extends Fragment{
     private final static float holdWithdraw = 20f;
 
-    private Table table;
+    private Table table = new Table();
     private Tile tile;
     private float holdTime = 0f;
     private boolean holding;
@@ -39,7 +36,8 @@ public class BlockInventoryFragment extends Fragment{
 
     @Remote(called = Loc.server, targets = Loc.both, forward = true)
     public static void requestItem(Player player, Tile tile, Item item, int amount){
-        if(player == null || tile == null) return;
+        if(player == null || tile == null || !player.timer.get(Player.timerTransfer, 20) || !tile.interactable(player.getTeam())) return;
+        if(!Units.canInteract(player, tile)) return;
 
         int removed = tile.block().removeStack(tile, item, amount);
 
@@ -51,29 +49,31 @@ public class BlockInventoryFragment extends Fragment{
 
     @Override
     public void build(Group parent){
-        table = new Table();
-        table.visible(() -> !state.is(State.menu));
+        table.setName("inventory");
         table.setTransform(true);
         parent.setTransform(true);
         parent.addChild(table);
     }
 
     public void showFor(Tile t){
-        if(this.tile == t.target()){
+        if(this.tile == t){
             hide();
             return;
         }
-        this.tile = t.target();
+        this.tile = t;
         if(tile == null || tile.entity == null || !tile.block().isAccessible() || tile.entity.items.total() == 0)
             return;
         rebuild(true);
     }
 
     public void hide(){
-        table.actions(Actions.scaleTo(0f, 1f, 0.06f, Interpolation.pow3Out), Actions.visible(false), Actions.run(() -> {
-            table.clear();
+        if(table == null) return;
+
+        table.actions(Actions.scaleTo(0f, 1f, 0.06f, Interpolation.pow3Out), Actions.run(() -> {
+            table.clearChildren();
+            table.clearListeners();
             table.update(null);
-        }));
+        }), Actions.visible(false));
         table.touchable(Touchable.disabled);
         tile = null;
     }
@@ -83,9 +83,11 @@ public class BlockInventoryFragment extends Fragment{
         IntSet container = new IntSet();
 
         table.clearChildren();
-        table.background("inventory");
+        table.clearActions();
+        table.background(Tex.inventory);
         table.touchable(Touchable.enabled);
         table.update(() -> {
+
             if(state.is(State.menu) || tile == null || tile.entity == null || !tile.block().isAccessible() || tile.entity.items.total() == 0){
                 hide();
             }else{
@@ -97,6 +99,8 @@ public class BlockInventoryFragment extends Fragment{
                         Call.requestItem(player, tile, lastItem, amount);
                         holding = false;
                         holdTime = 0f;
+
+                        Events.fire(new WithdrawEvent());
                     }
                 }
 
@@ -115,8 +119,8 @@ public class BlockInventoryFragment extends Fragment{
         int cols = 3;
         int row = 0;
 
-        table.margin(6f);
-        table.defaults().size(8 * 5).space(8f);
+        table.margin(4f);
+        table.defaults().size(8 * 5).pad(4f);
 
         if(tile.block().hasItems){
 
@@ -131,7 +135,7 @@ public class BlockInventoryFragment extends Fragment{
                 HandCursorListener l = new HandCursorListener();
                 l.setEnabled(canPick);
 
-                Element image = itemImage(item.icon(Icon.xlarge), () -> {
+                Element image = itemImage(item.icon(Cicon.xlarge), () -> {
                     if(tile == null || tile.entity == null){
                         return "";
                     }
@@ -142,13 +146,14 @@ public class BlockInventoryFragment extends Fragment{
                 image.addListener(new InputListener(){
                     @Override
                     public boolean touchDown(InputEvent event, float x, float y, int pointer, KeyCode button){
-                        if(!canPick.get() || !tile.entity.items.has(item)) return false;
+                        if(!canPick.get() || tile == null || tile.entity == null || tile.entity.items == null || !tile.entity.items.has(item)) return false;
                         int amount = Math.min(1, player.maxAccepted(item));
                         if(amount > 0){
                             Call.requestItem(player, tile, item, amount);
                             lastItem = item;
                             holding = true;
                             holdTime = 0f;
+                            Events.fire(new WithdrawEvent());
                         }
                         return true;
                     }
@@ -171,9 +176,13 @@ public class BlockInventoryFragment extends Fragment{
 
         updateTablePosition();
 
+        table.visible(true);
+
         if(actions){
-            table.actions(Actions.scaleTo(0f, 1f), Actions.visible(true),
-            Actions.scaleTo(1f, 1f, 0.07f, Interpolation.pow3Out));
+            table.setScale(0f, 1f);
+            table.actions(Actions.scaleTo(1f, 1f, 0.07f, Interpolation.pow3Out));
+        }else{
+            table.setScale(1f, 1f);
         }
     }
 

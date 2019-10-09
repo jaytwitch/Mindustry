@@ -20,6 +20,11 @@ public class Units{
     private static float cdist;
     private static boolean boolResult;
 
+    /** @return whether this player can interact with a specific tile. if either of these are null, returns true.*/
+    public static boolean canInteract(Player player, Tile tile){
+        return player == null || tile == null || tile.interactable(player.getTeam());
+    }
+
     /**
      * Validates a target.
      * @param target The target to validate
@@ -68,21 +73,21 @@ public class Units{
 
     /** Returns the neareset damaged tile. */
     public static TileEntity findDamagedTile(Team team, float x, float y){
-        Tile tile = Geometry.findClosest(x, y, world.indexer.getDamaged(team));
+        Tile tile = Geometry.findClosest(x, y, indexer.getDamaged(team));
         return tile == null ? null : tile.entity;
     }
 
     /** Returns the neareset ally tile in a range. */
     public static TileEntity findAllyTile(Team team, float x, float y, float range, Predicate<Tile> pred){
-        return world.indexer.findTile(team, x, y, range, pred);
+        return indexer.findTile(team, x, y, range, pred);
     }
 
     /** Returns the neareset enemy tile in a range. */
     public static TileEntity findEnemyTile(Team team, float x, float y, float range, Predicate<Tile> pred){
-        if(team == Team.none) return null;
+        if(team == Team.derelict) return null;
 
         for(Team enemy : state.teams.enemiesOf(team)){
-            TileEntity entity = world.indexer.findTile(enemy, x, y, range, pred);
+            TileEntity entity = indexer.findTile(enemy, x, y, range, pred);
             if(entity != null){
                 return entity;
             }
@@ -102,6 +107,8 @@ public class Units{
 
     /** Returns the closest target enemy. First, units are checked, then tile entities. */
     public static TargetTrait closestTarget(Team team, float x, float y, float range, Predicate<Unit> unitPred, Predicate<Tile> tilePred){
+        if(team == Team.derelict) return null;
+
         Unit unit = closestEnemy(team, x, y, range, unitPred);
         if(unit != null){
             return unit;
@@ -112,7 +119,7 @@ public class Units{
 
     /** Returns the closest enemy of this team. Filter by predicate. */
     public static Unit closestEnemy(Team team, float x, float y, float range, Predicate<Unit> predicate){
-        if(team == Team.none) return null;
+        if(team == Team.derelict) return null;
 
         result = null;
         cdist = 0f;

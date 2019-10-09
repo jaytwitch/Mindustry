@@ -12,20 +12,18 @@ import io.anuke.arc.util.pooling.Pools;
 import io.anuke.mindustry.content.Bullets;
 import io.anuke.mindustry.entities.EntityGroup;
 import io.anuke.mindustry.entities.Units;
-import io.anuke.mindustry.entities.bullet.Bullet;
-import io.anuke.mindustry.entities.impl.TimedEntity;
-import io.anuke.mindustry.entities.traits.*;
+import io.anuke.mindustry.entities.type.Bullet;
+import io.anuke.mindustry.entities.type.TimedEntity;
+import io.anuke.mindustry.entities.traits.DrawTrait;
+import io.anuke.mindustry.entities.traits.TimeTrait;
 import io.anuke.mindustry.entities.type.Unit;
 import io.anuke.mindustry.game.Team;
 import io.anuke.mindustry.gen.Call;
 import io.anuke.mindustry.graphics.Pal;
 
-import java.io.DataInput;
-import java.io.DataOutput;
-
 import static io.anuke.mindustry.Vars.bulletGroup;
 
-public class Lightning extends TimedEntity implements DrawTrait, SyncTrait, TimeTrait{
+public class Lightning extends TimedEntity implements DrawTrait, TimeTrait{
     public static final float lifetime = 10f;
 
     private static final RandomXS128 random = new RandomXS128();
@@ -49,7 +47,7 @@ public class Lightning extends TimedEntity implements DrawTrait, SyncTrait, Time
     }
 
     /** Do not invoke! */
-    @Remote(called = Loc.server)
+    @Remote(called = Loc.server, unreliable = true)
     public static void createLighting(int seed, Team team, Color color, float damage, float x, float y, float rotation, int length){
 
         Lightning l = Pools.obtain(Lightning.class, Lightning::new);
@@ -92,19 +90,6 @@ public class Lightning extends TimedEntity implements DrawTrait, SyncTrait, Time
     }
 
     @Override
-    public boolean isSyncing(){
-        return false;
-    }
-
-    @Override
-    public void write(DataOutput data){
-    }
-
-    @Override
-    public void read(DataInput data){
-    }
-
-    @Override
     public float lifetime(){
         return lifetime;
     }
@@ -125,7 +110,7 @@ public class Lightning extends TimedEntity implements DrawTrait, SyncTrait, Time
     @Override
     public void draw(){
         Lines.stroke(3f * fout());
-        Draw.color(color, Color.WHITE, fin());
+        Draw.color(color, Color.white, fin());
         Lines.beginLine();
 
         Lines.linePoint(x, y);

@@ -1,23 +1,23 @@
 package io.anuke.mindustry.type;
 
-import io.anuke.annotations.Annotations.Loc;
-import io.anuke.annotations.Annotations.Remote;
-import io.anuke.arc.Core;
-import io.anuke.arc.graphics.g2d.TextureRegion;
-import io.anuke.arc.math.Angles;
-import io.anuke.arc.math.Mathf;
-import io.anuke.arc.util.Time;
-import io.anuke.arc.util.Tmp;
-import io.anuke.mindustry.Vars;
-import io.anuke.mindustry.content.Fx;
-import io.anuke.mindustry.entities.Effects;
-import io.anuke.mindustry.entities.Effects.Effect;
-import io.anuke.mindustry.entities.bullet.Bullet;
-import io.anuke.mindustry.entities.bullet.BulletType;
-import io.anuke.mindustry.entities.traits.ShooterTrait;
-import io.anuke.mindustry.entities.type.Player;
-import io.anuke.mindustry.gen.Call;
-import io.anuke.mindustry.net.Net;
+import io.anuke.annotations.Annotations.*;
+import io.anuke.arc.*;
+import io.anuke.arc.audio.*;
+import io.anuke.arc.graphics.g2d.*;
+import io.anuke.arc.math.*;
+import io.anuke.arc.util.*;
+import io.anuke.arc.util.ArcAnnotate.*;
+import io.anuke.mindustry.*;
+import io.anuke.mindustry.content.*;
+import io.anuke.mindustry.entities.*;
+import io.anuke.mindustry.entities.Effects.*;
+import io.anuke.mindustry.entities.bullet.*;
+import io.anuke.mindustry.entities.traits.*;
+import io.anuke.mindustry.entities.type.*;
+import io.anuke.mindustry.entities.type.Bullet;
+import io.anuke.mindustry.gen.*;
+
+import static io.anuke.mindustry.Vars.net;
 
 public class Weapon{
     public final String name;
@@ -26,7 +26,7 @@ public class Weapon{
     protected static float minPlayerDist = 20f;
     protected static int sequenceNum = 0;
     /** bullet shot */
-    public BulletType bullet;
+    public @NonNull BulletType bullet;
     /** shell ejection effect */
     public Effect ejectEffect = Fx.none;
     /** weapon reload in frames */
@@ -56,6 +56,8 @@ public class Weapon{
     /** whether shooter rotation is ignored when shooting. */
     public boolean ignoreRotation = false;
 
+    public Sound shootSound = Sounds.pew;
+
     public TextureRegion region;
 
     protected Weapon(String name){
@@ -69,10 +71,11 @@ public class Weapon{
 
     @Remote(targets = Loc.server, called = Loc.both, unreliable = true)
     public static void onPlayerShootWeapon(Player player, float x, float y, float rotation, boolean left){
+
         if(player == null) return;
         //clients do not see their own shoot events: they are simulated completely clientside to prevent laggy visuals
         //messing with the firerate or any other stats does not affect the server (take that, script kiddies!)
-        if(Net.client() && player == Vars.player){
+        if(net.client() && player == Vars.player){
             return;
         }
 
@@ -88,13 +91,15 @@ public class Weapon{
     public static void shootDirect(ShooterTrait shooter, float offsetX, float offsetY, float rotation, boolean left){
         float x = shooter.getX() + offsetX;
         float y = shooter.getY() + offsetY;
+        float baseX = shooter.getX(), baseY = shooter.getY();
 
         Weapon weapon = shooter.getWeapon();
+        weapon.shootSound.at(x, y, Mathf.random(0.8f, 1.0f));
 
         sequenceNum = 0;
         if(weapon.shotDelay > 0.01f){
             Angles.shotgun(weapon.shots, weapon.spacing, rotation, f -> {
-                Time.run(sequenceNum * weapon.shotDelay, () -> weapon.bullet(shooter, x, y, f + Mathf.range(weapon.inaccuracy)));
+                Time.run(sequenceNum * weapon.shotDelay, () -> weapon.bullet(shooter, x + shooter.getX() - baseX, y + shooter.getY() - baseY, f + Mathf.range(weapon.inaccuracy)));
                 sequenceNum++;
             });
         }else{
@@ -151,7 +156,7 @@ public class Weapon{
     }
 
     public void shoot(ShooterTrait p, float x, float y, float angle, boolean left){
-        if(Net.client()){
+        if(net.client()){
             //call it directly, don't invoke on server
             shootDirect(p, x, y, angle, left);
         }else{

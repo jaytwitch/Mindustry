@@ -2,6 +2,7 @@ package io.anuke.mindustry.world.blocks.distribution;
 
 import io.anuke.arc.collection.Array;
 import io.anuke.arc.util.Time;
+import io.anuke.mindustry.content.*;
 import io.anuke.mindustry.entities.type.TileEntity;
 import io.anuke.mindustry.type.Item;
 import io.anuke.mindustry.world.*;
@@ -17,11 +18,12 @@ public class Router extends Block{
         hasItems = true;
         itemCapacity = 1;
         group = BlockGroup.transportation;
+        unloadable = false;
     }
 
     @Override
     public void update(Tile tile){
-        SplitterEntity entity = tile.entity();
+        RouterEntity entity = tile.entity();
 
         if(entity.lastItem == null && entity.items.total() > 0){
             entity.items.clear();
@@ -42,14 +44,14 @@ public class Router extends Block{
 
     @Override
     public boolean acceptItem(Item item, Tile tile, Tile source){
-        SplitterEntity entity = tile.entity();
+        RouterEntity entity = tile.entity();
 
         return tile.getTeam() == source.getTeam() && entity.lastItem == null && entity.items.total() == 0;
     }
 
     @Override
     public void handleItem(Item item, Tile tile, Tile source){
-        SplitterEntity entity = tile.entity();
+        RouterEntity entity = tile.entity();
         entity.items.add(item, 1);
         entity.lastItem = item;
         entity.time = 0f;
@@ -58,11 +60,11 @@ public class Router extends Block{
 
     Tile getTileTarget(Tile tile, Item item, Tile from, boolean set){
         Array<Tile> proximity = tile.entity.proximity();
-        int counter = tile.getDump();
+        int counter = tile.rotation();
         for(int i = 0; i < proximity.size; i++){
             Tile other = proximity.get((i + counter) % proximity.size);
-            if(tile == from) continue;
-            if(set) tile.setDump((byte)((tile.getDump() + 1) % proximity.size));
+            if(set) tile.rotation((byte)((tile.rotation() + 1) % proximity.size));
+            if(other == from && from.block() == Blocks.overflowGate) continue;
             if(other.block().acceptItem(item, other, Edges.getFacingEdge(tile, other))){
                 return other;
             }
@@ -72,7 +74,7 @@ public class Router extends Block{
 
     @Override
     public int removeStack(Tile tile, Item item, int amount){
-        SplitterEntity entity = tile.entity();
+        RouterEntity entity = tile.entity();
         int result = super.removeStack(tile, item, amount);
         if(result != 0 && item == entity.lastItem){
             entity.lastItem = null;
@@ -82,10 +84,10 @@ public class Router extends Block{
 
     @Override
     public TileEntity newEntity(){
-        return new SplitterEntity();
+        return new RouterEntity();
     }
 
-    public class SplitterEntity extends TileEntity{
+    public class RouterEntity extends TileEntity{
         Item lastItem;
         Tile lastInput;
         float time;

@@ -4,13 +4,14 @@ import io.anuke.arc.math.Angles;
 import io.anuke.arc.math.Mathf;
 import io.anuke.arc.util.Time;
 import io.anuke.mindustry.entities.Effects;
-import io.anuke.mindustry.entities.bullet.Bullet;
+import io.anuke.mindustry.entities.type.Bullet;
 import io.anuke.mindustry.entities.bullet.BulletType;
 import io.anuke.mindustry.entities.type.TileEntity;
 import io.anuke.mindustry.type.Liquid;
 import io.anuke.mindustry.world.Tile;
 import io.anuke.mindustry.world.consumers.*;
 import io.anuke.mindustry.world.meta.BlockStat;
+import io.anuke.mindustry.world.meta.StatUnit;
 
 import static io.anuke.mindustry.Vars.tilesize;
 
@@ -30,6 +31,9 @@ public class LaserTurret extends PowerTurret{
         super.setStats();
 
         stats.remove(BlockStat.boostEffect);
+        stats.remove(BlockStat.damage);
+        //damages every 5 ticks, at least in meltdown's case
+        stats.add(BlockStat.damage, shootType.damage * 60f / 5f, StatUnit.perSecond);
     }
 
     @Override
@@ -60,7 +64,7 @@ public class LaserTurret extends PowerTurret{
             return;
         }
 
-        if(entity.reload >= reload && entity.cons.valid()){
+        if(entity.reload >= reload && (entity.cons.valid() || tile.isEnemyCheat())){
             BulletType type = peekAmmo(tile);
 
             shoot(tile, type);
@@ -70,7 +74,7 @@ public class LaserTurret extends PowerTurret{
             Liquid liquid = entity.liquids.current();
             float maxUsed = consumes.<ConsumeLiquidBase>get(ConsumeType.liquid).amount;
 
-            float used = Math.min(entity.liquids.get(liquid), maxUsed * Time.delta());
+            float used = baseReloadSpeed(tile) * (tile.isEnemyCheat() ? maxUsed : Math.min(entity.liquids.get(liquid), maxUsed * Time.delta()));
             entity.reload += used;
             entity.liquids.remove(liquid, used);
 
@@ -98,6 +102,13 @@ public class LaserTurret extends PowerTurret{
     @Override
     public TileEntity newEntity(){
         return new LaserTurretEntity();
+    }
+
+    @Override
+    public boolean shouldActiveSound(Tile tile){
+        LaserTurretEntity entity = tile.entity();
+
+        return entity.bulletLife > 0 && entity.bullet != null;
     }
 
     class LaserTurretEntity extends TurretEntity{

@@ -1,33 +1,80 @@
 package io.anuke.mindustry.entities;
 
-import io.anuke.arc.collection.Array;
-import io.anuke.arc.collection.IntMap;
-import io.anuke.arc.function.Consumer;
-import io.anuke.arc.function.Predicate;
-import io.anuke.arc.math.geom.QuadTree;
-import io.anuke.arc.math.geom.Rectangle;
-import io.anuke.mindustry.entities.traits.Entity;
+import io.anuke.arc.*;
+import io.anuke.arc.collection.*;
+import io.anuke.arc.function.*;
+import io.anuke.arc.graphics.*;
+import io.anuke.arc.math.geom.*;
+import io.anuke.mindustry.entities.traits.*;
 
+import static io.anuke.mindustry.Vars.collisions;
+
+/** Represents a group of a certain type of entity.*/
+@SuppressWarnings("unchecked")
 public class EntityGroup<T extends Entity>{
-    private static int lastid;
     private final boolean useTree;
     private final int id;
     private final Class<T> type;
-    private final Array<T> entityArray = new Array<>(false, 16);
-    private final Array<T> entitiesToRemove = new Array<>(false, 16);
-    private final Array<T> entitiesToAdd = new Array<>(false, 16);
+    private final Array<T> entityArray = new Array<>(false, 32);
+    private final Array<T> entitiesToRemove = new Array<>(false, 32);
+    private final Array<T> entitiesToAdd = new Array<>(false, 32);
+    private final Array<T> intersectArray = new Array<>();
+    private final Rectangle intersectRect = new Rectangle();
     private IntMap<T> map;
-    private QuadTree<T> tree;
+    private QuadTree tree;
     private Consumer<T> removeListener;
     private Consumer<T> addListener;
 
-    public EntityGroup(Class<T> type, boolean useTree){
+    private final Rectangle viewport = new Rectangle();
+    private int count = 0;
+
+    public EntityGroup(int id, Class<T> type, boolean useTree){
         this.useTree = useTree;
-        this.id = lastid++;
+        this.id = id;
         this.type = type;
 
         if(useTree){
-            tree = new QuadTree<>(Entities.maxLeafObjects, new Rectangle(0, 0, 0, 0));
+            tree = new QuadTree<>(new Rectangle(0, 0, 0, 0));
+        }
+    }
+
+    public void update(){
+        updateEvents();
+
+        if(useTree()){
+            collisions.updatePhysics(this);
+        }
+
+        for(Entity e : all()){
+            e.update();
+        }
+    }
+
+    public int countInBounds(){
+        count = 0;
+        draw(e -> true, e -> count++);
+        return count;
+    }
+
+    public void draw(){
+        draw(e -> true);
+    }
+
+    public void draw(Predicate<T> toDraw){
+        draw(toDraw, t -> ((DrawTrait)t).draw());
+    }
+
+    public void draw(Predicate<T> toDraw, Consumer<T> cons){
+        Camera cam = Core.camera;
+        viewport.set(cam.position.x - cam.width / 2, cam.position.y - cam.height / 2, cam.width, cam.height);
+
+        for(Entity e : all()){
+            if(!(e instanceof DrawTrait) || !toDraw.test((T)e) || !e.isAdded()) continue;
+            DrawTrait draw = (DrawTrait)e;
+
+            if(viewport.overlaps(draw.getX() - draw.drawSize()/2f, draw.getY() - draw.drawSize()/2f, draw.drawSize(), draw.drawSize())){
+                cons.accept((T)e);
+            }
         }
     }
 
@@ -116,6 +163,15 @@ public class EntityGroup<T extends Entity>{
         tree().getIntersect(out, x, y, width, height);
     }
 
+    @SuppressWarnings("unchecked")
+    public Array<T> intersect(float x, float y, float width, float height){
+        intersectArray.clear();
+        //don't waste time for empty groups
+        if(isEmpty()) return intersectArray;
+        tree().getIntersect(intersectArray, intersectRect.set(x, y, width, height));
+        return intersectArray;
+    }
+
     public QuadTree tree(){
         if(!useTree) throw new RuntimeException("This group does not support quadtrees! Enable quadtrees when creating it.");
         return tree;
@@ -124,7 +180,7 @@ public class EntityGroup<T extends Entity>{
     /** Resizes the internal quadtree, if it is enabled.*/
     public void resize(float x, float y, float w, float h){
         if(useTree){
-            tree = new QuadTree<>(Entities.maxLeafObjects, new Rectangle(x, y, w, h));
+            tree = new QuadTree<>(new Rectangle(x, y, w, h));
         }
     }
 
@@ -170,8 +226,10 @@ public class EntityGroup<T extends Entity>{
     }
 
     public void clear(){
-        for(T entity : entityArray)
+        for(T entity : entityArray){
+            entity.removed();
             entity.setGroup(null);
+        }
 
         for(T entity : entitiesToAdd)
             entity.setGroup(null);

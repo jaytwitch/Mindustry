@@ -1,19 +1,15 @@
 package io.anuke.mindustry.world.blocks.distribution;
 
-import io.anuke.annotations.Annotations.Loc;
-import io.anuke.annotations.Annotations.Remote;
-import io.anuke.arc.Core;
-import io.anuke.arc.graphics.g2d.Draw;
-import io.anuke.arc.math.Mathf;
-import io.anuke.arc.scene.ui.layout.Table;
-import io.anuke.mindustry.entities.type.Player;
-import io.anuke.mindustry.entities.type.TileEntity;
-import io.anuke.mindustry.gen.Call;
-import io.anuke.mindustry.type.Item;
-import io.anuke.mindustry.world.Block;
-import io.anuke.mindustry.world.Tile;
-import io.anuke.mindustry.world.blocks.ItemSelection;
-import io.anuke.mindustry.world.meta.BlockGroup;
+import io.anuke.arc.*;
+import io.anuke.arc.graphics.g2d.*;
+import io.anuke.arc.math.*;
+import io.anuke.arc.scene.ui.layout.*;
+import io.anuke.arc.util.ArcAnnotate.*;
+import io.anuke.mindustry.entities.type.*;
+import io.anuke.mindustry.type.*;
+import io.anuke.mindustry.world.*;
+import io.anuke.mindustry.world.blocks.*;
+import io.anuke.mindustry.world.meta.*;
 
 import java.io.*;
 
@@ -29,6 +25,7 @@ public class Sorter extends Block{
         instantTransfer = true;
         group = BlockGroup.transportation;
         configurable = true;
+        unloadable = false;
     }
 
     @Override
@@ -38,15 +35,24 @@ public class Sorter extends Block{
 
     @Override
     public void playerPlaced(Tile tile){
-        Core.app.post(() -> Call.setSorterItem(null, tile, lastItem));
+        if(lastItem != null){
+            Core.app.post(() -> tile.configure(lastItem.id));
+        }
     }
 
+    /*
     @Remote(targets = Loc.both, called = Loc.both, forward = true)
     public static void setSorterItem(Player player, Tile tile, Item item){
+        if(!Units.canInteract(player, tile)) return;
         SorterEntity entity = tile.entity();
         if(entity != null){
             entity.sortItem = item;
         }
+    }*/
+
+    @Override
+    public void configured(Tile tile, Player player, int value){
+        tile.<SorterEntity>entity().sortItem = content.item(value);
     }
 
     @Override
@@ -57,7 +63,7 @@ public class Sorter extends Block{
         if(entity.sortItem == null) return;
 
         Draw.color(entity.sortItem.color);
-        Draw.rect("blank", tile.worldx(), tile.worldy(), 4f, 4f);
+        Draw.rect("center", tile.worldx(), tile.worldy());
         Draw.color();
     }
 
@@ -75,6 +81,10 @@ public class Sorter extends Block{
         to.block().handleItem(item, to, tile);
     }
 
+    boolean isSame(Tile tile, Tile other){
+        return other != null && other.block() == this && other.<SorterEntity>entity().sortItem == tile.<SorterEntity>entity().sortItem;
+    }
+
     Tile getTileTarget(Item item, Tile dest, Tile source, boolean flip){
         SorterEntity entity = dest.entity();
 
@@ -83,14 +93,18 @@ public class Sorter extends Block{
         Tile to;
 
         if(item == entity.sortItem){
+            //prevent 3-chains
+            if(isSame(dest, source) && isSame(dest, dest.getNearby(dir))){
+                return null;
+            }
             to = dest.getNearby(dir);
         }else{
             Tile a = dest.getNearby(Mathf.mod(dir - 1, 4));
             Tile b = dest.getNearby(Mathf.mod(dir + 1, 4));
             boolean ac = a != null && !(a.block().instantTransfer && source.block().instantTransfer) &&
-            a.block().acceptItem(item, a, dest);
+                    a.block().acceptItem(item, a, dest);
             boolean bc = b != null && !(b.block().instantTransfer && source.block().instantTransfer) &&
-            b.block().acceptItem(item, b, dest);
+                    b.block().acceptItem(item, b, dest);
 
             if(ac && !bc){
                 to = a;
@@ -99,14 +113,14 @@ public class Sorter extends Block{
             }else if(!bc){
                 return null;
             }else{
-                if(dest.getDump() == 0){
+                if(dest.rotation() == 0){
                     to = a;
                     if(flip)
-                        dest.setDump((byte)1);
+                        dest.rotation((byte)1);
                 }else{
                     to = b;
                     if(flip)
-                        dest.setDump((byte)0);
+                        dest.rotation((byte)0);
                 }
             }
         }
@@ -119,7 +133,7 @@ public class Sorter extends Block{
         SorterEntity entity = tile.entity();
         ItemSelection.buildItemTable(table, () -> entity.sortItem, item -> {
             lastItem = item;
-            Call.setSorterItem(null, tile, item);
+            tile.configure(item == null ? -1 : item.id);
         });
     }
 
@@ -128,18 +142,33 @@ public class Sorter extends Block{
         return new SorterEntity();
     }
 
-    public static class SorterEntity extends TileEntity{
-        public Item sortItem;
+
+    public class SorterEntity extends TileEntity{
+        @Nullable Item sortItem;
 
         @Override
-        public void writeConfig(DataOutput stream) throws IOException{
-            stream.writeByte(sortItem == null ? -1 : sortItem.id);
+        public int config(){
+            return sortItem == null ? -1 : sortItem.id;
         }
 
         @Override
-        public void readConfig(DataInput stream) throws IOException{
-            byte b = stream.readByte();
-            sortItem = b == -1 ? null : content.items().get(b);
+        public byte version(){
+            return 2;
+        }
+
+        @Override
+        public void write(DataOutput stream) throws IOException{
+            super.write(stream);
+            stream.writeShort(sortItem == null ? -1 : sortItem.id);
+        }
+
+        @Override
+        public void read(DataInput stream, byte revision) throws IOException{
+            super.read(stream, revision);
+            sortItem = content.item(stream.readShort());
+            if(revision == 1){
+                new DirectionalItemBuffer(20, 45f).read(stream);
+            }
         }
     }
 }

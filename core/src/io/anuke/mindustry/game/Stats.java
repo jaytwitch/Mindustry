@@ -9,7 +9,7 @@ import io.anuke.mindustry.type.*;
 @Serialize
 public class Stats{
     /** Items delivered to global resoure counter. Zones only. */
-    public ObjectIntMap<Item> itemsDelivered = new ObjectIntMap<>();
+    public transient ObjectIntMap<Item> itemsDelivered = new ObjectIntMap<>();
     /** Enemy (red team) units destroyed. */
     public int enemyUnitsDestroyed;
     /** Total waves lasted. */
@@ -26,8 +26,10 @@ public class Stats{
     public RankResult calculateRank(Zone zone, boolean launched){
         float score = 0;
 
-        //each new launch period adds onto the rank 'points'
-        if(wavesLasted >= zone.conditionWave){
+        if(launched && zone.getRules().attackMode){
+            score += 3f;
+        }else if(wavesLasted >= zone.conditionWave){
+            //each new launch period adds onto the rank 'points'
             score += (float)((wavesLasted - zone.conditionWave) / zone.launchPeriod + 1) * 1.2f;
         }
 

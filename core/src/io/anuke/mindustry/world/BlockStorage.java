@@ -3,7 +3,7 @@ package io.anuke.mindustry.world;
 import io.anuke.arc.collection.Array;
 import io.anuke.arc.math.Mathf;
 import io.anuke.arc.math.geom.Vector2;
-import io.anuke.arc.util.Time;
+import io.anuke.arc.util.*;
 import io.anuke.mindustry.Vars;
 import io.anuke.mindustry.content.Fx;
 import io.anuke.mindustry.entities.Effects;
@@ -28,7 +28,6 @@ public abstract class BlockStorage extends UnlockableContent{
 
     public int itemCapacity = 10;
     public float liquidCapacity = 10f;
-    public float liquidFlowFactor = 4.9f;
 
     public final BlockStats stats = new BlockStats();
     public final BlockBars bars = new BlockBars();
@@ -92,11 +91,11 @@ public abstract class BlockStorage extends UnlockableContent{
     }
 
     public boolean acceptItem(Item item, Tile tile, Tile source){
-        return consumes.itemFilters[item.id] && tile.entity.items.get(item) < getMaximumAccepted(tile, item);
+        return consumes.itemFilters.get(item.id) && tile.entity.items.get(item) < getMaximumAccepted(tile, item);
     }
 
     public boolean acceptLiquid(Tile tile, Tile source, Liquid liquid, float amount){
-        return hasLiquids && tile.entity.liquids.get(liquid) + amount < liquidCapacity && consumes.liquidfilters[liquid.id];
+        return hasLiquids && tile.entity.liquids.get(liquid) + amount < liquidCapacity && consumes.liquidfilters.get(liquid.id);
     }
 
     public void handleLiquid(Tile tile, Tile source, Liquid liquid, float amount){
@@ -105,14 +104,14 @@ public abstract class BlockStorage extends UnlockableContent{
 
     public void tryDumpLiquid(Tile tile, Liquid liquid){
         Array<Tile> proximity = tile.entity.proximity();
-        int dump = tile.getDump();
+        int dump = tile.rotation();
 
         for(int i = 0; i < proximity.size; i++){
             incrementDump(tile, proximity.size);
             Tile other = proximity.get((i + dump) % proximity.size);
             Tile in = Edges.getFacingEdge(tile, other);
 
-            if(other.getTeam() == tile.getTeam() && other.block().hasLiquids && canDumpLiquid(tile, other, liquid)){
+            if(other.getTeam() == tile.getTeam() && other.block().hasLiquids && canDumpLiquid(tile, other, liquid) && other.entity.liquids != null){
                 float ofract = other.entity.liquids.get(liquid) / other.block().liquidCapacity;
                 float fract = tile.entity.liquids.get(liquid) / liquidCapacity;
 
@@ -138,7 +137,7 @@ public abstract class BlockStorage extends UnlockableContent{
     public float tryMoveLiquid(Tile tile, Tile next, boolean leak, Liquid liquid){
         if(next == null) return 0;
 
-        next = next.target();
+        next = next.link();
 
         if(next.getTeam() == tile.getTeam() && next.block().hasLiquids && tile.entity.liquids.get(liquid) > 0f){
 
@@ -182,7 +181,7 @@ public abstract class BlockStorage extends UnlockableContent{
      */
     public void offloadNear(Tile tile, Item item){
         Array<Tile> proximity = tile.entity.proximity();
-        int dump = tile.getDump();
+        int dump = tile.rotation();
 
         for(int i = 0; i < proximity.size; i++){
             incrementDump(tile, proximity.size);
@@ -212,7 +211,7 @@ public abstract class BlockStorage extends UnlockableContent{
             return false;
 
         Array<Tile> proximity = entity.proximity();
-        int dump = tile.getDump();
+        int dump = tile.rotation();
 
         if(proximity.size == 0) return false;
 
@@ -249,7 +248,7 @@ public abstract class BlockStorage extends UnlockableContent{
     }
 
     protected void incrementDump(Tile tile, int prox){
-        tile.setDump((byte)((tile.getDump() + 1) % prox));
+        tile.rotation((byte)((tile.rotation() + 1) % prox));
     }
 
     /** Used for dumping items. */
@@ -259,8 +258,9 @@ public abstract class BlockStorage extends UnlockableContent{
 
     /** Try offloading an item to a nearby container in its facing direction. Returns true if success. */
     public boolean offloadDir(Tile tile, Item item){
-        Tile other = tile.getNearby(tile.getRotation());
-        if(other != null && other.target().getTeamID() == tile.getTeamID() && other.block().acceptItem(item, other, tile)){
+        Tile other = tile.getNearby(tile.rotation());
+        if(other != null) other = other.link();
+        if(other != null && other.getTeam() == tile.getTeam() && other.block().acceptItem(item, other, tile)){
             other.block().handleItem(item, other, tile);
             return true;
         }

@@ -4,16 +4,22 @@ import java.lang.annotation.*;
 
 public class Annotations{
 
-    @Target({ElementType.METHOD, ElementType.FIELD})
+    @Target(ElementType.TYPE)
     @Retention(RetentionPolicy.SOURCE)
-    public @interface Nullable{
+    public @interface StyleDefaults {
+    }
+
+    /** Indicates that a method should always call its super version. */
+    @Target(ElementType.METHOD)
+    @Retention(RetentionPolicy.SOURCE)
+    public @interface CallSuper{
 
     }
 
-    @Target({ElementType.METHOD, ElementType.FIELD})
+    /** Annotation that allows overriding CallSuper annotation. To be used on method that overrides method with CallSuper annotation from parent class.*/
+    @Target(ElementType.METHOD)
     @Retention(RetentionPolicy.SOURCE)
-    public @interface NonNull{
-
+    public @interface OverrideCallSuper {
     }
 
     /** Marks a class as serializable. */

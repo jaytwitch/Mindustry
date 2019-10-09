@@ -1,23 +1,23 @@
 package io.anuke.mindustry;
 
-import com.badlogic.gdx.backends.iosrobovm.IOSApplication;
-import com.badlogic.gdx.backends.iosrobovm.IOSApplicationConfiguration;
-import io.anuke.arc.Core;
-import io.anuke.arc.files.FileHandle;
-import io.anuke.arc.scene.ui.layout.Unit;
-import io.anuke.arc.util.Strings;
-import io.anuke.mindustry.core.Platform;
-import io.anuke.mindustry.game.Saves.SaveSlot;
-import io.anuke.mindustry.io.SaveIO;
-import io.anuke.mindustry.net.Net;
-import io.anuke.mindustry.net.ArcNetClient;
-import io.anuke.mindustry.net.ArcNetServer;
-import org.robovm.apple.foundation.NSAutoreleasePool;
-import org.robovm.apple.foundation.NSURL;
+import com.badlogic.gdx.backends.iosrobovm.*;
+import io.anuke.arc.*;
+import io.anuke.arc.files.*;
+import io.anuke.arc.function.*;
+import io.anuke.arc.scene.ui.layout.*;
+import io.anuke.arc.util.*;
+import io.anuke.arc.util.io.*;
+import io.anuke.mindustry.game.EventType.*;
+import io.anuke.mindustry.game.Saves.*;
+import io.anuke.mindustry.io.*;
+import io.anuke.mindustry.ui.*;
+import org.robovm.apple.foundation.*;
 import org.robovm.apple.uikit.*;
+import org.robovm.objc.block.*;
 
-import java.io.IOException;
-import java.util.Collections;
+import java.io.*;
+import java.util.*;
+import java.util.zip.*;
 
 import static io.anuke.mindustry.Vars.*;
 import static org.robovm.apple.foundation.NSPathUtilities.getDocumentsDirectory;
@@ -27,19 +27,75 @@ public class IOSLauncher extends IOSApplication.Delegate{
 
     @Override
     protected IOSApplication createApplication(){
-        Net.setClientProvider(new ArcNetClient());
-        Net.setServerProvider(new ArcNetServer());
 
         if(UIDevice.getCurrentDevice().getUserInterfaceIdiom() == UIUserInterfaceIdiom.Pad){
-            Unit.dp.addition = 0.5f;
+            Scl.setAddition(0.5f);
         }else{
-            Unit.dp.addition = -0.5f;
+            Scl.setAddition(-0.5f);
         }
 
-        Platform.instance = new Platform(){
+        IOSApplicationConfiguration config = new IOSApplicationConfiguration();
+        return new IOSApplication(new ClientLauncher(){
+
+            @Override
+            public void showFileChooser(boolean open, String extension, Consumer<FileHandle> cons){
+                UIDocumentBrowserViewController cont = new UIDocumentBrowserViewController((NSArray)null);
+
+                NSArray<UIBarButtonItem> arr = new NSArray<>(new UIBarButtonItem(Core.bundle.get("cancel"), UIBarButtonItemStyle.Plain,
+                    uiBarButtonItem -> cont.dismissViewController(true, () -> {})));
+
+                cont.setAllowsDocumentCreation(!open);
+                cont.setAdditionalLeadingNavigationBarButtonItems(arr);
+
+                class ChooserDelegate extends NSObject implements UIDocumentBrowserViewControllerDelegate{
+                    @Override
+                    public void didPickDocumentURLs(UIDocumentBrowserViewController controller, NSArray<NSURL> documentURLs){
+
+                    }
+
+                    @Override
+                    public void didPickDocumentsAtURLs(UIDocumentBrowserViewController controller, NSArray<NSURL> documentURLs){
+                        if(documentURLs.size() < 1) return;
+
+                        cont.dismissViewController(true, () -> {});
+                        controller.importDocument(documentURLs.get(0), new NSURL(getDocumentsDirectory() + "/document"), UIDocumentBrowserImportMode.Copy, (url, error) -> cons.accept(Core.files.absolute(url.getPath())));
+                    }
+
+                    @Override
+                    public void didRequestDocumentCreationWithHandler(UIDocumentBrowserViewController controller, VoidBlock2<NSURL, UIDocumentBrowserImportMode> importHandler){
+
+                    }
+
+                    @Override
+                    public void didImportDocument(UIDocumentBrowserViewController controller, NSURL sourceURL, NSURL destinationURL){
+                        cons.accept(Core.files.absolute(destinationURL.getAbsoluteString()));
+                    }
+
+                    @Override
+                    public void failedToImportDocument(UIDocumentBrowserViewController controller, NSURL documentURL, NSError error){
+
+                    }
+
+                    @Override
+                    public NSArray<UIActivity> applicationActivities(UIDocumentBrowserViewController controller, NSArray<NSURL> documentURLs){
+                        return null;
+                    }
+
+                    @Override
+                    public void willPresentActivityViewController(UIDocumentBrowserViewController controller, UIActivityViewController activityViewController){
+
+                    }
+                }
+
+                cont.setDelegate(new ChooserDelegate());
+                UIApplication.getSharedApplication().getKeyWindow().getRootViewController().presentViewController(cont, true, () -> {
+
+                });
+            }
 
             @Override
             public void shareFile(FileHandle file){
+                Log.info("Attempting to share file " + file);
                 FileHandle to = Core.files.absolute(getDocumentsDirectory()).child(file.name());
                 file.copyTo(to);
 
@@ -54,22 +110,22 @@ public class IOSLauncher extends IOSApplication.Delegate{
             @Override
             public void beginForceLandscape(){
                 forced = true;
+                UINavigationController.attemptRotationToDeviceOrientation();
             }
 
             @Override
             public void endForceLandscape(){
                 forced = false;
+                UINavigationController.attemptRotationToDeviceOrientation();
             }
-        };
-
-        IOSApplicationConfiguration config = new IOSApplicationConfiguration();
-        return new IOSApplication(new Mindustry(), config);
+        }, config);
     }
 
     @Override
     public UIInterfaceOrientationMask getSupportedInterfaceOrientations(UIApplication application, UIWindow window){
         return forced ? UIInterfaceOrientationMask.Landscape : UIInterfaceOrientationMask.All;
     }
+
 
     @Override
     public boolean openURL(UIApplication app, NSURL url, UIApplicationOpenURLOptions options){
@@ -87,12 +143,26 @@ public class IOSLauncher extends IOSApplication.Delegate{
             openURL(((NSURL)options.get(UIApplicationLaunchOptions.Keys.URL())));
         }
 
+        Events.on(ClientLoadEvent.class, e -> {
+            Core.app.post(() -> Core.app.post(() -> {
+                Core.scene.table(Styles.black9, t -> {
+                    t.visible(() -> {
+                        if(!forced) return false;
+                        t.toFront();
+                        UIInterfaceOrientation o = UIApplication.getSharedApplication().getStatusBarOrientation();
+                        return forced && (o == UIInterfaceOrientation.Portrait || o == UIInterfaceOrientation.PortraitUpsideDown);
+                    });
+                    t.add("Please rotate the device to landscape orientation to use the editor.").wrap().grow();
+                });
+            }));
+        });
+
         return b;
     }
 
     void openURL(NSURL url){
 
-        Core.app.post(() -> {
+        Core.app.post(() -> Core.app.post(() -> {
             FileHandle file = Core.files.absolute(getDocumentsDirectory()).child(url.getLastPathComponent());
             Core.files.absolute(url.getPath()).copyTo(file);
 
@@ -100,25 +170,27 @@ public class IOSLauncher extends IOSApplication.Delegate{
 
                 if(SaveIO.isSaveValid(file)){
                     try{
-                        SaveSlot slot = control.saves.importSave(file);
-                        ui.load.runLoadSave(slot);
+                        SaveMeta meta = SaveIO.getMeta(new DataInputStream(new InflaterInputStream(file.read(Streams.DEFAULT_BUFFER_SIZE))));
+                        if(meta.tags.containsKey("name")){
+                            //is map
+                            if(!ui.editor.isShown()){
+                                ui.editor.show();
+                            }
+
+                            ui.editor.beginEditMap(file);
+                        }else{
+                            SaveSlot slot = control.saves.importSave(file);
+                            ui.load.runLoadSave(slot);
+                        }
                     }catch(IOException e){
-                        ui.showError(Core.bundle.format("save.import.fail", Strings.parseException(e, false)));
+                        ui.showException("$save.import.fail", e);
                     }
                 }else{
-                    ui.showError("save.import.invalid");
+                    ui.showErrorMessage("$save.import.invalid");
                 }
 
-            }else if(file.extension().equalsIgnoreCase(mapExtension)){ //open map
-                Core.app.post(() -> {
-                    if(!ui.editor.isShown()){
-                        ui.editor.show();
-                    }
-
-                    ui.editor.beginEditMap(file);
-                });
             }
-        });
+        }));
     }
 
     public static void main(String[] argv){

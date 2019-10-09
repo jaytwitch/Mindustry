@@ -1,49 +1,96 @@
 package io.anuke.mindustry.game;
 
-import io.anuke.arc.Core;
-import io.anuke.arc.function.Supplier;
+import io.anuke.arc.*;
+import io.anuke.arc.function.*;
+import io.anuke.mindustry.maps.*;
 
-/** Defines preset rule sets.. */
+import static io.anuke.mindustry.Vars.waveTeam;
+
+/** Defines preset rule sets. */
 public enum Gamemode{
-    survival(() -> new Rules(){{
-        waveTimer = true;
-        waves = true;
-        unitDrops = true;
-        spawns = DefaultWaves.get();
-    }}),
-    sandbox(() -> new Rules(){{
-        infiniteResources = true;
-        waves = true;
-        waveTimer = false;
-        respawnTime = 0f;
-    }}),
-    attack(() -> new Rules(){{
-        enemyCheat = true;
-        unitDrops = true;
-        waves = false;
-        attackMode = true;
-    }}),
-    pvp(() -> new Rules(){{
-        pvp = true;
-        enemyCoreBuildRadius = 600f;
-        respawnTime = 60 * 10;
-        buildCostMultiplier = 0.5f;
-        buildSpeedMultiplier = 2f;
-        playerDamageMultiplier = 0.45f;
-        playerHealthMultiplier = 0.8f;
-        unitBuildSpeedMultiplier = 3f;
-        unitHealthMultiplier = 2f;
-        attackMode = true;
-    }});
+    survival(rules -> {
+        rules.waveTimer = true;
+        rules.waves = true;
+        rules.unitDrops = true;
+    }, map -> map.spawns > 0),
+    sandbox(rules -> {
+        rules.infiniteResources = true;
+        rules.waves = true;
+        rules.waveTimer = false;
+        rules.respawnTime = 0f;
+    }),
+    attack(rules -> {
+        rules.unitDrops = true;
+        rules.attackMode = true;
+    }, map -> map.teams.contains(waveTeam.ordinal())),
+    pvp(rules -> {
+        rules.pvp = true;
+        rules.enemyCoreBuildRadius = 600f;
+        rules.respawnTime = 60 * 10;
+        rules.buildCostMultiplier = 1f;
+        rules.buildSpeedMultiplier = 1f;
+        rules.playerDamageMultiplier = 0.33f;
+        rules.playerHealthMultiplier = 0.5f;
+        rules.unitBuildSpeedMultiplier = 2f;
+        rules.unitHealthMultiplier = 3f;
+        rules.attackMode = true;
+    }, map -> map.teams.size > 1),
+    editor(true, rules -> {
+        rules.infiniteResources = true;
+        rules.editor = true;
+        rules.waves = false;
+        rules.enemyCoreBuildRadius = 0f;
+        rules.waveTimer = false;
+        rules.respawnTime = 0f;
+    });
 
-    private final Supplier<Rules> rules;
+    private final Consumer<Rules> rules;
+    private final Predicate<Map> validator;
 
-    Gamemode(Supplier<Rules> rules){
-        this.rules = rules;
+    public final boolean hidden;
+    public final static Gamemode[] all = values();
+
+    Gamemode(Consumer<Rules> rules){
+        this(false, rules);
     }
 
-    public Rules get(){
-        return rules.get();
+    Gamemode(boolean hidden, Consumer<Rules> rules){
+         this(hidden, rules, m -> true);
+    }
+
+    Gamemode(Consumer<Rules> rules, Predicate<Map> validator){
+        this(false, rules, validator);
+    }
+
+    Gamemode(boolean hidden, Consumer<Rules> rules, Predicate<Map> validator){
+        this.rules = rules;
+        this.hidden = hidden;
+        this.validator = validator;
+    }
+
+    public static Gamemode bestFit(Rules rules){
+        if(rules.pvp){
+            return pvp;
+        }else if(rules.editor){
+            return editor;
+        }else if(rules.attackMode){
+            return attack;
+        }else if(rules.infiniteResources){
+            return sandbox;
+        }else{
+            return survival;
+        }
+    }
+
+    /** Applies this preset to this ruleset. */
+    public Rules apply(Rules in){
+        rules.accept(in);
+        return in;
+    }
+
+    /** @return whether this mode can be played on the specified map. */
+    public boolean valid(Map map){
+        return validator.test(map);
     }
 
     public String description(){

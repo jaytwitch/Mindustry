@@ -1,11 +1,9 @@
 package io.anuke.mindustry.server;
 
-import io.anuke.arc.ApplicationListener;
-import io.anuke.arc.Core;
-import io.anuke.mindustry.Vars;
+import io.anuke.arc.*;
+import io.anuke.mindustry.*;
 import io.anuke.mindustry.core.*;
-import io.anuke.mindustry.game.Content;
-import io.anuke.mindustry.io.BundleLoader;
+import io.anuke.mindustry.mod.*;
 
 import static io.anuke.mindustry.Vars.*;
 
@@ -19,19 +17,20 @@ public class MindustryServer implements ApplicationListener{
     @Override
     public void init(){
         Core.settings.setDataDirectory(Core.files.local("config"));
-        Vars.init();
-
+        loadLocales = false;
         headless = true;
 
-        BundleLoader.load();
-        content.verbose(false);
-        content.load();
+        Vars.loadSettings();
+        Vars.init();
+        content.createContent();
+        content.init();
 
         Core.app.addListener(logic = new Logic());
-        Core.app.addListener(world = new World());
         Core.app.addListener(netServer = new NetServer());
         Core.app.addListener(new ServerControl(args));
 
-        content.initialize(Content::init);
+        mods.each(Mod::init);
     }
+
+
 }

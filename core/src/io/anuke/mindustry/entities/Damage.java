@@ -1,21 +1,22 @@
 package io.anuke.mindustry.entities;
 
 import io.anuke.annotations.Annotations.Struct;
+import io.anuke.arc.*;
 import io.anuke.arc.collection.GridBits;
 import io.anuke.arc.collection.IntQueue;
-import io.anuke.arc.function.Consumer;
-import io.anuke.arc.function.Predicate;
+import io.anuke.arc.function.*;
 import io.anuke.arc.graphics.Color;
 import io.anuke.arc.math.Mathf;
 import io.anuke.arc.math.geom.*;
-import io.anuke.arc.util.Time;
+import io.anuke.arc.util.*;
 import io.anuke.mindustry.content.Bullets;
 import io.anuke.mindustry.content.Fx;
 import io.anuke.mindustry.entities.Effects.Effect;
-import io.anuke.mindustry.entities.bullet.Bullet;
+import io.anuke.mindustry.entities.type.Bullet;
 import io.anuke.mindustry.entities.effect.Fire;
 import io.anuke.mindustry.entities.effect.Lightning;
 import io.anuke.mindustry.entities.type.Unit;
+import io.anuke.mindustry.game.EventType.*;
 import io.anuke.mindustry.game.Team;
 import io.anuke.mindustry.gen.Call;
 import io.anuke.mindustry.gen.PropCell;
@@ -36,7 +37,7 @@ public class Damage{
     public static void dynamicExplosion(float x, float y, float flammability, float explosiveness, float power, float radius, Color color){
         for(int i = 0; i < Mathf.clamp(power / 20, 0, 6); i++){
             int branches = 5 + Mathf.clamp((int)(power / 30), 1, 20);
-            Time.run(i * 2f + Mathf.random(4f), () -> Lightning.create(Team.none, Pal.power, 3,
+            Time.run(i * 2f + Mathf.random(4f), () -> Lightning.create(Team.derelict, Pal.power, 3,
             x, y, Mathf.random(360f), branches + Mathf.range(2)));
         }
 
@@ -78,18 +79,30 @@ public class Damage{
         }
     }
 
+    public static void collideLine(Bullet hitter, Team team, Effect effect, float x, float y, float angle, float length){
+        collideLine(hitter, team, effect, x, y, angle, length, false);
+    }
+
     /**
      * Damages entities in a line.
      * Only enemies of the specified team are damaged.
      */
-    public static void collideLine(Bullet hitter, Team team, Effect effect, float x, float y, float angle, float length){
+    public static void collideLine(Bullet hitter, Team team, Effect effect, float x, float y, float angle, float length, boolean large){
         tr.trns(angle, length);
-        world.raycastEachWorld(x, y, x + tr.x, y + tr.y, (cx, cy) -> {
-            Tile tile = world.tile(cx, cy);
-            if(tile != null) tile = tile.target();
-            if(tile != null && tile.entity != null && tile.target().getTeamID() != team.ordinal() && tile.entity.collide(hitter)){
+        IntPositionConsumer collider = (cx, cy) -> {
+            Tile tile = world.ltile(cx, cy);
+            if(tile != null && tile.entity != null && tile.getTeamID() != team.ordinal() && tile.entity.collide(hitter)){
                 tile.entity.collision(hitter);
                 hitter.getBulletType().hit(hitter, tile.worldx(), tile.worldy());
+            }
+        };
+
+        world.raycastEachWorld(x, y, x + tr.x, y + tr.y, (cx, cy) -> {
+            collider.accept(cx, cy);
+            if(large){
+                for(Point2 p : Geometry.d4){
+                    collider.accept(cx + p.x, cy + p.y);
+                }
             }
             return false;
         });
@@ -176,6 +189,10 @@ public class Damage{
             //TODO better velocity displacement
             float dst = tr.set(entity.x - x, entity.y - y).len();
             entity.velocity().add(tr.setLength((1f - dst / radius) * 2f / entity.mass()));
+
+            if(complete && damage >= 9999999f && entity == player){
+                Events.fire(Trigger.exclusionDeath);
+            }
         };
 
         rect.setSize(radius * 2).setCenter(x, y);
@@ -216,11 +233,9 @@ public class Damage{
             int scaledDamage = (int)(damage * (1f - (float)dst / radius));
 
             bits.set(bitOffset + x, bitOffset + y);
-            Tile tile = world.tile(startx + x, starty + y);
+            Tile tile = world.ltile(startx + x, starty + y);
 
             if(scaledDamage <= 0 || tile == null) continue;
-
-            tile = tile.target();
 
             //apply damage to entity if needed
             if(tile.entity != null && tile.getTeam() != team){

@@ -1,26 +1,27 @@
 package io.anuke.mindustry.world.blocks.distribution;
 
-import io.anuke.arc.Core;
-import io.anuke.arc.collection.LongArray;
-import io.anuke.arc.graphics.g2d.Draw;
-import io.anuke.arc.graphics.g2d.TextureRegion;
-import io.anuke.arc.math.Mathf;
+import io.anuke.arc.*;
+import io.anuke.arc.collection.*;
+import io.anuke.arc.function.*;
+import io.anuke.arc.graphics.g2d.*;
+import io.anuke.arc.math.*;
 import io.anuke.arc.math.geom.*;
 import io.anuke.arc.util.*;
-import io.anuke.mindustry.entities.type.TileEntity;
-import io.anuke.mindustry.entities.type.Unit;
-import io.anuke.mindustry.graphics.Layer;
-import io.anuke.mindustry.input.InputHandler.PlaceDraw;
-import io.anuke.mindustry.type.Item;
-import io.anuke.mindustry.world.Block;
-import io.anuke.mindustry.world.Tile;
+import io.anuke.mindustry.entities.traits.BuilderTrait.*;
+import io.anuke.mindustry.entities.type.*;
+import io.anuke.mindustry.game.*;
+import io.anuke.mindustry.gen.*;
+import io.anuke.mindustry.graphics.*;
+import io.anuke.mindustry.type.*;
+import io.anuke.mindustry.world.*;
+import io.anuke.mindustry.world.blocks.*;
 import io.anuke.mindustry.world.meta.*;
 
 import java.io.*;
 
 import static io.anuke.mindustry.Vars.*;
 
-public class Conveyor extends Block{
+public class Conveyor extends Block implements Autotiler{
     private static final float itemSpace = 0.4f;
     private static final float minmove = 1f / (Short.MAX_VALUE - 2);
     private static ItemPos drawpos = new ItemPos();
@@ -28,6 +29,8 @@ public class Conveyor extends Block{
     private static ItemPos pos2 = new ItemPos();
     private final Vector2 tr1 = new Vector2();
     private final Vector2 tr2 = new Vector2();
+    private final int[] blendresult = new int[3];
+    private final BuildRequest[] directionals = new BuildRequest[4];
 
     private TextureRegion[][] regions = new TextureRegion[7][4];
 
@@ -41,6 +44,10 @@ public class Conveyor extends Block{
         group = BlockGroup.transportation;
         hasItems = true;
         itemCapacity = 4;
+
+        idleSound = Sounds.conveyor;
+        idleSoundVolume = 0.004f;
+        unloadable = false;
     }
 
     private static int compareItems(long a, long b){
@@ -69,7 +76,7 @@ public class Conveyor extends Block{
     @Override
     public void draw(Tile tile){
         ConveyorEntity entity = tile.entity();
-        byte rotation = tile.getRotation();
+        byte rotation = tile.rotation();
 
         int frame = entity.clogHeat <= 0.5f ? (int)(((Time.time() * speed * 8f * entity.timeScale)) % 4) : 0;
         Draw.rect(regions[Mathf.clamp(entity.blendbits, 0, regions.length - 1)][Mathf.clamp(frame, 0, regions[0].length - 1)], tile.drawx(), tile.drawy(),
@@ -77,59 +84,35 @@ public class Conveyor extends Block{
     }
 
     @Override
+    public boolean shouldIdleSound(Tile tile){
+        ConveyorEntity entity = tile.entity();
+        return entity.clogHeat <= 0.5f ;
+    }
+
+    @Override
     public void onProximityUpdate(Tile tile){
         super.onProximityUpdate(tile);
 
         ConveyorEntity entity = tile.entity();
-        entity.blendbits = 0;
-        entity.blendsclx = entity.blendscly = 1;
-
-        if(blends(tile, 2) && blends(tile, 1) && blends(tile, 3)){
-            entity.blendbits = 3;
-        }else if(blends(tile, 1) && blends(tile, 3)){
-            entity.blendbits = 4;
-        }else if(blends(tile, 1) && blends(tile, 2)){
-            entity.blendbits = 2;
-        }else if(blends(tile, 3) && blends(tile, 2)){
-            entity.blendbits = 2;
-            entity.blendscly = -1;
-        }else if(blends(tile, 1)){
-            entity.blendbits = 1;
-            entity.blendscly = -1;
-        }else if(blends(tile, 3)){
-            entity.blendbits = 1;
-        }
+        int[] bits = buildBlending(tile, tile.rotation(), null);
+        entity.blendbits = bits[0];
+        entity.blendsclx = bits[1];
+        entity.blendscly = bits[2];
     }
 
     @Override
-    public void getPlaceDraw(PlaceDraw draw, int rotation, int prevX, int prevY, int prevRotation){
-        draw.rotation = rotation;
-        draw.scalex = draw.scaley = 1;
+    public void drawRequestRegion(BuildRequest req, Eachable<BuildRequest> list){
+        int[] bits = getTiling(req, list);
 
-        int blendbits = 0;
+        if(bits == null) return;
 
-        if(blends(rotation, 1, prevX, prevY, prevRotation)){
-            blendbits = 1;
-            draw.scaley = -1;
-        }else if(blends(rotation, 3, prevX, prevY, prevRotation)){
-            blendbits = 1;
-        }
-
-        draw.rotation = rotation;
-        draw.region = regions[blendbits][0];
+        TextureRegion region = regions[bits[0]][0];
+        Draw.rect(region, req.drawx(), req.drawy(), region.getWidth() * bits[1] * Draw.scl, region.getHeight() * bits[2] * Draw.scl, req.rotation * 90);
     }
 
-    private boolean blends(int rotation, int offset, int prevX, int prevY, int prevRotation){
-        Point2 left = Geometry.d4(rotation - offset);
-        return left.equals(prevX, prevY) && prevRotation == Mathf.mod(rotation + offset, 4);
-    }
-
-    private boolean blends(Tile tile, int direction){
-        Tile other = tile.getNearby(Mathf.mod(tile.getRotation() - direction, 4));
-        if(other != null) other = other.target();
-
-        return other != null && other.block().outputsItems()
-        && ((tile.getNearby(tile.getRotation()) == other) || (!other.block().rotate || other.getNearby(other.getRotation()) == tile));
+    @Override
+    public boolean blends(Tile tile, int rotation, int otherx, int othery, int otherrot, Block otherblock){
+        return otherblock.outputsItems() && lookingAt(tile, rotation, otherx, othery, otherrot, otherblock);
     }
 
     @Override
@@ -141,7 +124,7 @@ public class Conveyor extends Block{
     public void drawLayer(Tile tile){
         ConveyorEntity entity = tile.entity();
 
-        byte rotation = tile.getRotation();
+        byte rotation = tile.rotation();
 
         try{
 
@@ -153,7 +136,7 @@ public class Conveyor extends Block{
                 tr1.trns(rotation * 90, tilesize, 0);
                 tr2.trns(rotation * 90, -tilesize / 2f, pos.x * tilesize / 2f);
 
-                Draw.rect(pos.item.icon(Item.Icon.medium),
+                Draw.rect(pos.item.icon(Cicon.medium),
                 (tile.x * tilesize + tr1.x * pos.y + tr2.x),
                 (tile.y * tilesize + tr1.y * pos.y + tr2.y), itemSize, itemSize);
             }
@@ -176,7 +159,7 @@ public class Conveyor extends Block{
         float speed = this.speed * tilesize / 2.4f;
         float centerSpeed = 0.1f;
         float centerDstScl = 3f;
-        float tx = Geometry.d4[tile.getRotation()].x, ty = Geometry.d4[tile.getRotation()].y;
+        float tx = Geometry.d4[tile.rotation()].x, ty = Geometry.d4[tile.rotation()].y;
 
         float centerx = 0f, centery = 0f;
 
@@ -197,7 +180,8 @@ public class Conveyor extends Block{
     public void update(Tile tile){
         ConveyorEntity entity = tile.entity();
         entity.minitem = 1f;
-        Tile next = tile.getNearby(tile.getRotation());
+        Tile next = tile.getNearby(tile.rotation());
+        if(next != null) next = next.link();
 
         float nextMax = next != null && next.block() instanceof Conveyor ? 1f - Math.max(itemSpace - next.<ConveyorEntity>entity().minitem, 0) : 1f;
         int minremove = Integer.MAX_VALUE;
@@ -231,7 +215,7 @@ public class Conveyor extends Block{
 
                     ItemPos ni = pos2.set(othere.convey.get(othere.lastInserted), ItemPos.updateShorts);
 
-                    if(next.getRotation() == tile.getRotation()){
+                    if(next.rotation() == tile.rotation()){
                         ni.x = pos.x;
                     }
                     othere.convey.set(othere.lastInserted, ni.pack());
@@ -290,7 +274,7 @@ public class Conveyor extends Block{
 
     @Override
     public void getStackOffset(Item item, Tile tile, Vector2 trns){
-        trns.trns(tile.getRotation() * 90 + 180f, tilesize / 2f);
+        trns.trns(tile.rotation() * 90 + 180f, tilesize / 2f);
     }
 
     @Override
@@ -314,15 +298,15 @@ public class Conveyor extends Block{
 
     @Override
     public boolean acceptItem(Item item, Tile tile, Tile source){
-        int direction = source == null ? 0 : Math.abs(source.relativeTo(tile.x, tile.y) - tile.getRotation());
+        int direction = source == null ? 0 : Math.abs(source.relativeTo(tile.x, tile.y) - tile.rotation());
         float minitem = tile.<ConveyorEntity>entity().minitem;
         return (((direction == 0) && minitem > itemSpace) ||
-        ((direction % 2 == 1) && minitem > 0.52f)) && (source == null || !(source.block().rotate && (source.getRotation() + 2) % 4 == tile.getRotation()));
+        ((direction % 2 == 1) && minitem > 0.52f)) && (source == null || !(source.block().rotate && (source.rotation() + 2) % 4 == tile.rotation()));
     }
 
     @Override
     public void handleItem(Item item, Tile tile, Tile source){
-        byte rotation = tile.getRotation();
+        byte rotation = tile.rotation();
 
         int ch = Math.abs(source.relativeTo(tile.x, tile.y) - rotation);
         int ang = ((source.relativeTo(tile.x, tile.y) - rotation));
@@ -367,6 +351,7 @@ public class Conveyor extends Block{
 
         @Override
         public void write(DataOutput stream) throws IOException{
+            super.write(stream);
             stream.writeInt(convey.size);
 
             for(int i = 0; i < convey.size; i++){
@@ -375,7 +360,8 @@ public class Conveyor extends Block{
         }
 
         @Override
-        public void read(DataInput stream) throws IOException{
+        public void read(DataInput stream, byte revision) throws IOException{
+            super.read(stream, revision);
             convey.clear();
             int amount = stream.readInt();
             convey.ensureCapacity(Math.min(amount, 10));

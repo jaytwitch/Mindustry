@@ -1,22 +1,17 @@
 package io.anuke.mindustry.core;
 
 import io.anuke.arc.collection.*;
-import io.anuke.arc.function.Consumer;
-import io.anuke.arc.graphics.Color;
-import io.anuke.arc.graphics.Pixmap;
-import io.anuke.arc.util.Log;
+import io.anuke.arc.function.*;
+import io.anuke.arc.graphics.*;
+import io.anuke.arc.util.*;
 import io.anuke.mindustry.content.*;
-import io.anuke.mindustry.entities.bullet.Bullet;
-import io.anuke.mindustry.entities.bullet.BulletType;
-import io.anuke.mindustry.entities.effect.*;
-import io.anuke.mindustry.entities.traits.TypeTrait;
-import io.anuke.mindustry.entities.type.Player;
+import io.anuke.mindustry.entities.bullet.*;
 import io.anuke.mindustry.game.*;
 import io.anuke.mindustry.type.*;
-import io.anuke.mindustry.world.Block;
-import io.anuke.mindustry.world.LegacyColorMapper;
+import io.anuke.mindustry.world.*;
 
 import static io.anuke.arc.Core.files;
+import static io.anuke.mindustry.Vars.mods;
 
 /**
  * Loads all game content.
@@ -25,8 +20,6 @@ import static io.anuke.arc.Core.files;
 @SuppressWarnings("unchecked")
 public class ContentLoader{
     private boolean loaded = false;
-    private boolean verbose = false;
-
     private ObjectMap<String, MappableContent>[] contentNameMap = new ObjectMap[ContentType.values().length];
     private Array<Content>[] contentMap = new Array[ContentType.values().length];
     private MappableContent[][] temporaryMapper;
@@ -43,23 +36,26 @@ public class ContentLoader{
         new Loadouts(),
         new TechTree(),
         new Zones(),
+        new TypeIDs(),
 
         //these are not really content classes, but this makes initialization easier
         new LegacyColorMapper(),
     };
 
-    public void setVerbose(){
-        verbose = true;
+    /** Clears all initialized content.*/
+    public void clear(){
+        contentNameMap = new ObjectMap[ContentType.values().length];
+        contentMap = new Array[ContentType.values().length];
+        initialization = new ObjectSet<>();
+        loaded = false;
     }
 
     /** Creates all content types. */
-    public void load(){
+    public void createContent(){
         if(loaded){
             Log.info("Content already loaded, skipping.");
             return;
         }
-
-        registerTypes();
 
         for(ContentType type : ContentType.values()){
             contentMap[type.ordinal()] = new Array<>();
@@ -70,55 +66,50 @@ public class ContentLoader{
             list.load();
         }
 
-        int total = 0;
-
-        for(ContentType type : ContentType.values()){
-
-            for(Content c : contentMap[type.ordinal()]){
-                if(c instanceof MappableContent){
-                    String name = ((MappableContent)c).name;
-                    if(contentNameMap[type.ordinal()].containsKey(name)){
-                        throw new IllegalArgumentException("Two content objects cannot have the same name! (issue: '" + name + "')");
-                    }
-                    contentNameMap[type.ordinal()].put(name, (MappableContent)c);
-                }
-                total++;
-            }
+        if(mods != null){
+            mods.loadContent();
         }
 
-        //set up ID mapping
+        //check up ID mapping, make sure it's linear
         for(Array<Content> arr : contentMap){
             for(int i = 0; i < arr.size; i++){
                 int id = arr.get(i).id;
-                if(id < 0) id += 256;
                 if(id != i){
                     throw new IllegalArgumentException("Out-of-order IDs for content '" + arr.get(i) + "' (expected " + i + " but got " + id + ")");
                 }
             }
         }
 
-        if(blocks().size >= 256){
-            throw new ImpendingDoomException("THE TIME HAS COME. More than 256 blocks have been created.");
-        }
-
-        if(verbose){
-            Log.info("--- CONTENT INFO ---");
-            for(int k = 0; k < contentMap.length; k++){
-                Log.info("[{0}]: loaded {1}", ContentType.values()[k].name(), contentMap[k].size);
-            }
-            Log.info("Total content loaded: {0}", total);
-            Log.info("-------------------");
-        }
-
         loaded = true;
     }
 
+    /** Logs content statistics.*/
+    public void logContent(){
+        Log.info("--- CONTENT INFO ---");
+        for(int k = 0; k < contentMap.length; k++){
+            Log.info("[{0}]: loaded {1}", ContentType.values()[k].name(), contentMap[k].size);
+        }
+        Log.info("Total content loaded: {0}", Array.with(ContentType.values()).mapInt(c -> contentMap[c.ordinal()].size).sum());
+        Log.info("-------------------");
+    }
+
+    /** Calls Content#init() on everything. Use only after all modules have been created.*/
+    public void init(){
+        initialize(Content::init);
+    }
+
+    /** Calls Content#load() on everything. Use only after all modules have been created on the client.*/
+    public void load(){
+        initialize(Content::load);
+    }
+
     /** Initializes all content with the specified function. */
-    public void initialize(Consumer<Content> callable){
+    private void initialize(Consumer<Content> callable){
         if(initialization.contains(callable)) return;
 
         for(ContentType type : ContentType.values()){
             for(Content content : contentMap[type.ordinal()]){
+                //TODO catch error and display it per mod
                 callable.accept(content);
             }
         }
@@ -129,7 +120,7 @@ public class ContentLoader{
     /** Loads block colors. */
     public void loadColors(){
         Pixmap pixmap = new Pixmap(files.internal("sprites/block_colors.png"));
-        for(int i = 0; i < 256; i++){
+        for(int i = 0; i < pixmap.getWidth(); i++){
             if(blocks().size > i){
                 int color = pixmap.getPixel(i, 0);
 
@@ -142,16 +133,20 @@ public class ContentLoader{
         pixmap.dispose();
     }
 
-    public void verbose(boolean verbose){
-        this.verbose = verbose;
-    }
-
     public void dispose(){
-        //clear all content, currently not needed
+        //clear all content, currently not used
     }
 
     public void handleContent(Content content){
         contentMap[content.getContentType().ordinal()].add(content);
+
+    }
+
+    public void handleMappableContent(MappableContent content){
+        if(contentNameMap[content.getContentType().ordinal()].containsKey(content.name)){
+            throw new IllegalArgumentException("Two content objects cannot have the same name! (issue: '" + content.name + "')");
+        }
+        contentNameMap[content.getContentType().ordinal()].put(content.name, content);
     }
 
     public void setTemporaryMapper(MappableContent[][] temporaryMapper){
@@ -170,12 +165,14 @@ public class ContentLoader{
     }
 
     public <T extends Content> T getByID(ContentType type, int id){
-        //offset negative values by 256, as they are probably a product of byte overflow
-        if(id < 0) id += 256;
 
         if(temporaryMapper != null && temporaryMapper[type.ordinal()] != null && temporaryMapper[type.ordinal()].length != 0){
+            //-1 = invalid content
+            if(id < 0){
+                return null;
+            }
             if(temporaryMapper[type.ordinal()].length <= id || temporaryMapper[type.ordinal()][id] == null){
-                return getByID(type, 0); //default value is always ID 0
+                return (T)contentMap[type.ordinal()].get(0); //default value is always ID 0
             }
             return (T)temporaryMapper[type.ordinal()][id];
         }
@@ -230,23 +227,5 @@ public class ContentLoader{
 
     public Array<UnitType> units(){
         return getBy(ContentType.unit);
-    }
-
-    /**
-     * Registers sync IDs for all types of sync entities.
-     * Do not register units here!
-     */
-    private void registerTypes(){
-        TypeTrait.registerType(Player.class, Player::new);
-        TypeTrait.registerType(Fire.class, Fire::new);
-        TypeTrait.registerType(Puddle.class, Puddle::new);
-        TypeTrait.registerType(Bullet.class, Bullet::new);
-        TypeTrait.registerType(Lightning.class, Lightning::new);
-    }
-
-    private class ImpendingDoomException extends RuntimeException{
-        ImpendingDoomException(String s){
-            super(s);
-        }
     }
 }
